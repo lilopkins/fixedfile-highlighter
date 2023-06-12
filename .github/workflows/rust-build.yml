@@ -2,8 +2,8 @@ name: Build Rust Applications
 
 on:
   push:
-    branches:
-      - main
+    tags: 
+      - "*"
 
 jobs:
   build:
