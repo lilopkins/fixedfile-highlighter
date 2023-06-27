@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{BufRead, BufReader, Read},
+    io::{BufRead, BufReader, Read}, path::Path,
 };
 
 use anyhow::{Context, bail};
@@ -32,6 +32,10 @@ struct Args {
     /// The colours to output the analysed file with. This can be one of a number of inputs: a predefined preset (greyscale [default], rainbow) or; a comma separated list of hex codes.
     #[arg(short = 'c', long = "colors")]
     colors: Option<String>,
+
+    /// Output an HTML snippet, rather than a full file
+    #[arg(short = 's', long = "snippet")]
+    snippet: bool,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -81,7 +85,7 @@ fn main() -> anyhow::Result<()> {
 
     // parse input file into lines
     info!("Parsing input file");
-    let file = File::open(args.input_file).context("Failed to open input file.")?;
+    let file = File::open(&args.input_file).context("Failed to open input file.")?;
     let lines = BufReader::new(file).lines();
 
     // parse syntax file into vec
@@ -98,6 +102,11 @@ fn main() -> anyhow::Result<()> {
 
     // create highlighted regions and output as HTML
     info!("Creating regions and outputting");
+    if !args.snippet {
+        println!("<!doctype html><html>");
+        println!(r#"<head><meta charset="utf8"><title>Analysis of {}</title></head>"#, Path::new(&args.input_file).file_name().unwrap().to_string_lossy());
+        println!("<body>");
+    }
     println!("<pre>");
     for (idx, line) in lines.enumerate() {
         let line = line.context("Failed to read line from input file.")?;
@@ -165,7 +174,11 @@ fn main() -> anyhow::Result<()> {
     let mut syntax_b64 = String::new();
     general_purpose::STANDARD_NO_PAD.encode_string(syntax_file, &mut syntax_b64);
     println!(r#"Analysed at {} by <a href="https://github.com/lilopkins/fixedfile-highlighter" target="_blank" rel="noopener">fixedfile-highlighter</a> using <a href="data:text/csv;base64,{}">this syntax file</a>."#, Local::now(), syntax_b64);
-    
+
+    if !args.snippet {
+        println!("</body></html>");
+    }
+
     info!("Done!");
     Ok(())
 }
