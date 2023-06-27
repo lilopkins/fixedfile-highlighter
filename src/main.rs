@@ -1,9 +1,11 @@
 use std::{
     fs::File,
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Read},
 };
 
 use anyhow::Context;
+use base64::{engine::general_purpose, Engine};
+use chrono::Local;
 use clap::Parser;
 use log::{info, warn};
 use regex::Regex;
@@ -56,9 +58,10 @@ fn main() -> anyhow::Result<()> {
     // parse syntax file into vec
     info!("Parsing syntax file");
     let mut records = Vec::new();
-    let mut csv_reader = csv::Reader::from_reader(BufReader::new(
-        File::open(args.syntax_file).context("Failed to open syntax file.")?,
-    ));
+    let mut syntax_file_reader = BufReader::new(File::open(args.syntax_file).context("Failed to open syntax file.")?);
+    let mut syntax_file = String::new();
+    syntax_file_reader.read_to_string(&mut syntax_file)?;
+    let mut csv_reader = csv::Reader::from_reader(syntax_file.as_bytes());
     for result in csv_reader.deserialize() {
         let highlight_record: HighlightRecord = result.context("Failed to parse syntax record.")?;
         records.push(highlight_record);
@@ -129,6 +132,10 @@ fn main() -> anyhow::Result<()> {
         }
     }
     println!("</pre>");
+
+    let mut syntax_b64 = String::new();
+    general_purpose::STANDARD_NO_PAD.encode_string(syntax_file, &mut syntax_b64);
+    println!(r#"Analysed at {} by <a href="https://github.com/lilopkins/fixedfile-highlighter" target="_blank" rel="noopener">fixedfile-highlighter</a> using <a href="data:text/csv;base64,{}">this syntax file</a>."#, Local::now(), syntax_b64);
     
     info!("Done!");
     Ok(())
