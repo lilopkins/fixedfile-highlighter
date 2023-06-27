@@ -3,7 +3,7 @@ use std::{
     io::{BufRead, BufReader, Read},
 };
 
-use anyhow::Context;
+use anyhow::{Context, bail};
 use base64::{engine::general_purpose, Engine};
 use chrono::Local;
 use clap::Parser;
@@ -28,6 +28,10 @@ struct Args {
     /// The syntax file to use
     #[arg(index = 2)]
     syntax_file: String,
+
+    /// The colours to output the analysed file with. This can be one of a number of inputs: a predefined preset (greyscale [default], rainbow) or; a comma separated list of hex codes.
+    #[arg(short = 'c', long = "colors")]
+    colors: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -49,6 +53,31 @@ struct HighlightRegion {
 fn main() -> anyhow::Result<()> {
     pretty_env_logger::init_custom_env("LOG");
     let args = Args::parse();
+
+    // parse colours
+    let color_preset_greyscale: Vec<String> = vec!["fff".to_owned(), "ccc".to_owned()];
+    let color_preset_rainbow: Vec<String> = vec!["fff".to_owned(), "f88".to_owned(), "ffc088".to_owned(), "a2ff88".to_owned(), "88f9ff".to_owned(), "a288ff".to_owned(), "ff88ba".to_owned()];
+
+    let colors = if args.colors.is_some() {
+        let c = args.colors.unwrap();
+        if c.to_lowercase() == "greyscale" || c.to_lowercase() == "grayscale" {
+            color_preset_greyscale
+        } else if c.to_lowercase() == "rainbow" {
+            color_preset_rainbow
+        } else {
+            let mut cs = Vec::new();
+            for color in c.split(',') {
+                cs.push(color.to_owned());
+            }
+            cs
+        }
+    } else {
+        color_preset_greyscale
+    };
+
+    if colors.len() == 0 {
+        bail!("No colours have been specified so no output can be produced!");
+    }
 
     // parse input file into lines
     info!("Parsing input file");
@@ -95,13 +124,13 @@ fn main() -> anyhow::Result<()> {
         }
 
         // output line
-        let mut alt = false;
+        let mut color_idx = 0;
         let mut opened_tags = 0;
         for (col, chr) in line.chars().enumerate() {
             for r in &regions {
                 if r.start == col {
-                    let style = if alt { "background: #ccc;" } else { "background: #fff;" };
-                    alt = !alt;
+                    let style = format!("background: #{}; color: #020202;", colors[color_idx]);
+                    color_idx = (color_idx + 1) % colors.len();
                     opened_tags += 1;
                     print!(r#"<abbr title="{}" style="{}">"#, r.name, style);
                 }
