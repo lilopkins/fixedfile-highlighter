@@ -93,11 +93,13 @@ fn main() -> anyhow::Result<()> {
 
         // output line
         let mut alt = false;
+        let mut opened_tags = 0;
         for (col, chr) in line.chars().enumerate() {
             for r in &regions {
                 if r.start == col {
                     let style = if alt { "background: #ccc;" } else { "background: #fff;" };
                     alt = !alt;
+                    opened_tags += 1;
                     print!(r#"<abbr title="{}" style="{}">"#, r.name, style);
                 }
             }
@@ -105,10 +107,19 @@ fn main() -> anyhow::Result<()> {
             for r in &mut regions {
                 if r.end == col + 1 {
                     print!("</abbr>");
+                    opened_tags -= 1;
                     r.applied = true;
                 }
             }
         }
+        
+        if opened_tags != 0 {
+            warn!("Line {} was not long enough to fit the matching regions.", idx);
+            for _ in 0..opened_tags {
+                print!("</abbr>");
+            }
+        }
+
         println!();
 
         for r in regions {
