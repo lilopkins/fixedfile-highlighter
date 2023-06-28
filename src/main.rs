@@ -7,7 +7,7 @@ use anyhow::{Context, bail};
 use base64::{engine::general_purpose, Engine};
 use chrono::Local;
 use clap::Parser;
-use log::{info, warn};
+use log::{info, error};
 use regex::Regex;
 
 /// Highlight parts of a file given a syntax.
@@ -33,15 +33,31 @@ struct Args {
     #[arg(short = 'c', long = "colors")]
     colors: Option<String>,
 
+    /// Interpret the input file as being delimited by the provided character. The syntax file will not be expected to take the headers: `field`, `name`, `condition`.
+    #[arg(short = 'd', long = "delimiter")]
+    delimiter: Option<char>,
+
     /// Output an HTML snippet, rather than a full file
     #[arg(short = 's', long = "snippet")]
     snippet: bool,
 }
 
+enum RecordList {
+    FixedWidth(Vec<FixedWidthHighlightRecord>),
+    Delimiter(char, Vec<DelimiterHighlightRecord>),
+}
+
 #[derive(Debug, serde::Deserialize)]
-struct HighlightRecord {
-    start: usize,
-    length: usize,
+struct FixedWidthHighlightRecord {
+    start: Option<usize>,
+    length: Option<usize>,
+    name: String,
+    condition: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct DelimiterHighlightRecord {
+    field: Option<usize>,
     name: String,
     condition: Option<String>,
 }
@@ -90,15 +106,8 @@ fn main() -> anyhow::Result<()> {
 
     // parse syntax file into vec
     info!("Parsing syntax file");
-    let mut records = Vec::new();
-    let mut syntax_file_reader = BufReader::new(File::open(args.syntax_file).context("Failed to open syntax file.")?);
-    let mut syntax_file = String::new();
-    syntax_file_reader.read_to_string(&mut syntax_file)?;
-    let mut csv_reader = csv::Reader::from_reader(syntax_file.as_bytes());
-    for result in csv_reader.deserialize() {
-        let highlight_record: HighlightRecord = result.context("Failed to parse syntax record.")?;
-        records.push(highlight_record);
-    }
+    let syntax_file = read_syntax_file(args.syntax_file)?;
+    let records = parse_syntax_file(&syntax_file, args.delimiter)?;
 
     // create highlighted regions and output as HTML
     info!("Creating regions and outputting");
@@ -110,64 +119,10 @@ fn main() -> anyhow::Result<()> {
     println!("<pre>");
     for (idx, line) in lines.enumerate() {
         let line = line.context("Failed to read line from input file.")?;
-        let mut regions = Vec::new();
 
         // produce regions
-        for record in &records {
-            let apply_record_to_this_line = if record.condition.is_some() {
-                let re = Regex::new(&record.condition.clone().unwrap())
-                    .context("Failed to parse condition regex.")?;
-                re.is_match(&line)
-            } else {
-                true
-            };
-
-            if apply_record_to_this_line {
-                regions.push(HighlightRegion {
-                    start: record.start - 1,
-                    end: record.start + record.length - 1,
-                    name: record.name.clone(),
-                    applied: false,
-                })
-            }
-        }
-
-        // output line
-        let mut color_idx = 0;
-        let mut opened_tags = 0;
-        for (col, chr) in line.chars().enumerate() {
-            for r in &regions {
-                if r.start == col {
-                    let style = format!("background: #{}; color: #020202;", colors[color_idx]);
-                    color_idx = (color_idx + 1) % colors.len();
-                    opened_tags += 1;
-                    print!(r#"<abbr title="{}" style="{}">"#, r.name, style);
-                }
-            }
-            print!("{}", chr);
-            for r in &mut regions {
-                if r.end == col + 1 {
-                    print!("</abbr>");
-                    opened_tags -= 1;
-                    r.applied = true;
-                }
-            }
-        }
-        
-        if opened_tags != 0 {
-            warn!("Line {} was not long enough to fit the matching regions.", idx);
-            for _ in 0..opened_tags {
-                print!("</abbr>");
-            }
-        }
-
-        println!();
-
-        for r in regions {
-            if r.applied == false {
-                warn!("Failed to highlight rule {} on line {}!", r.name, idx);
-            }
-        }
+        let regions = generate_highlight_regions_from_records(&records, &line)?;
+        produce_html_for_line(idx, line, regions, &colors);
     }
     println!("</pre>");
 
@@ -181,4 +136,144 @@ fn main() -> anyhow::Result<()> {
 
     info!("Done!");
     Ok(())
+}
+
+fn read_syntax_file<P: AsRef<Path>>(syntax_file: P) -> anyhow::Result<String> {
+    let mut syntax_file_reader = BufReader::new(File::open(syntax_file).context("Failed to open syntax file.")?);
+    let mut syntax_file = String::new();
+    syntax_file_reader.read_to_string(&mut syntax_file)?;
+    Ok(syntax_file)
+}
+
+fn parse_syntax_file(syntax_file: &str, delimiter: Option<char>) -> anyhow::Result<RecordList> {
+    if delimiter.is_some() {
+        let mut records = Vec::new();
+        let mut csv_reader = csv::Reader::from_reader(syntax_file.as_bytes());
+        for result in csv_reader.deserialize() {
+            let highlight_record: DelimiterHighlightRecord = result.context("Failed to parse syntax record.")?;
+            records.push(highlight_record);
+        }
+        Ok(RecordList::Delimiter(delimiter.unwrap(), records))
+    } else {
+        let mut records = Vec::new();
+        let mut csv_reader = csv::Reader::from_reader(syntax_file.as_bytes());
+        for result in csv_reader.deserialize() {
+            let highlight_record: FixedWidthHighlightRecord = result.context("Failed to parse syntax record.")?;
+            records.push(highlight_record);
+        }
+        Ok(RecordList::FixedWidth(records))
+    }
+}
+
+fn generate_highlight_regions_from_records(records: &RecordList, line: &String) -> anyhow::Result<Vec<HighlightRegion>> {
+    let mut regions = Vec::new();
+
+    match records {
+        RecordList::FixedWidth(fw_records) => {
+            for record in fw_records {
+                let apply_record_to_this_line = if record.condition.is_some() {
+                    let re = Regex::new(&record.condition.clone().unwrap())
+                        .context("Failed to parse condition regex.")?;
+                    re.is_match(line)
+                } else {
+                    true
+                };
+        
+                if apply_record_to_this_line {
+                    if record.start.is_none() || record.length.is_none() {
+                        error!("Syntax record skipped as fields were not correctly filled in. (needs 'start' and 'length'!)");
+                        continue;
+                    }
+    
+                    regions.push(HighlightRegion {
+                        start: record.start.unwrap() - 1,
+                        end: record.start.unwrap() + record.length.unwrap() - 1,
+                        name: record.name.clone(),
+                        applied: false,
+                    })
+                }
+            }
+        },
+
+        RecordList::Delimiter(delimiter, d_records) => {
+            for record in d_records {
+                let apply_record_to_this_line = if record.condition.is_some() {
+                    let re = Regex::new(&record.condition.clone().unwrap())
+                        .context("Failed to parse condition regex.")?;
+                    re.is_match(line)
+                } else {
+                    true
+                };
+        
+                if apply_record_to_this_line {
+                    if record.field.is_none() {
+                        error!("Syntax record skipped as fields were not correctly filled in. (needs 'field'!)");
+                        continue;
+                    }
+    
+                    regions.push(HighlightRegion {
+                        start: if record.field.unwrap() == 1 { 0 } else { find_nth(delimiter, record.field.unwrap() - 1, line).unwrap_or(0) },
+                        end: find_nth(delimiter, record.field.unwrap(), line).unwrap_or(line.len()),
+                        name: record.name.clone(),
+                        applied: false,
+                    })
+                }
+            }
+        },
+    }
+
+    Ok(regions)
+}
+
+/// Find the `n`th occurrence of `delimiter` in `line`, and return the index of it, or `None` if it wasn't there.
+fn find_nth(delimiter: &char, mut n: usize, line: &String) -> Option<usize> {
+    let mut idx = 0;
+    for c in line.chars() {
+        if c == *delimiter {
+            n -= 1;
+            if n == 0 {
+                return Some(idx);
+            }
+        }
+        idx += 1;
+    }
+    None
+}
+
+fn produce_html_for_line(line_index: usize, line: String, mut regions: Vec<HighlightRegion>, colors: &Vec<String>) {
+    let mut color_idx = 0;
+    let mut opened_tags = 0;
+    for (col, chr) in line.chars().enumerate() {
+        for r in &regions {
+            if r.start == col {
+                let style = format!("background: #{}; color: #020202;", colors[color_idx]);
+                color_idx = (color_idx + 1) % colors.len();
+                opened_tags += 1;
+                print!(r#"<abbr title="{}" style="{}">"#, r.name, style);
+            }
+        }
+        print!("{}", chr);
+        for r in &mut regions {
+            if r.end == col + 1 {
+                print!("</abbr>");
+                opened_tags -= 1;
+                r.applied = true;
+            }
+        }
+    }
+        
+    if opened_tags != 0 {
+        error!("Line {} was not long enough to fit the matching regions.", line_index);
+        for _ in 0..opened_tags {
+            print!("</abbr>");
+        }
+    }
+
+    println!();
+
+    for r in regions {
+        if r.applied == false {
+            error!("Failed to highlight rule {} on line {}!", r.name, line_index);
+        }
+    }
 }
