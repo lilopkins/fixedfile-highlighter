@@ -131,7 +131,7 @@ fn main() -> anyhow::Result<()> {
         );
         println!("<body>");
     }
-    println!("<pre>");
+    println!(r#"<pre style="color:red">"#);
     for (idx, line) in lines.enumerate() {
         let line = line.context("Failed to read line from input file.")?;
 
@@ -140,6 +140,8 @@ fn main() -> anyhow::Result<()> {
         produce_html_for_line(idx, line, regions, &colors);
     }
     println!("</pre>");
+
+    println!(r#"<p><small>Hover over text to see the name of the field it is part of. Lines of text are surrounded by '&gt;' and '&lt;' to make them clearer to see. Text in red has not matched any rules.</small></p>"#);
 
     let mut syntax_b64 = String::new();
     general_purpose::STANDARD_NO_PAD.encode_string(syntax_file, &mut syntax_b64);
@@ -269,6 +271,7 @@ fn produce_html_for_line(
     mut regions: Vec<HighlightRegion>,
     colors: &Vec<String>,
 ) {
+    print!(r#"<span style="color:#909090;">L{:3}&nbsp;&gt;&nbsp;</span>"#, line_index + 1);
     let mut color_idx = 0;
     let mut opened_tags = 0;
     for (col, chr) in line.chars().enumerate() {
@@ -290,23 +293,29 @@ fn produce_html_for_line(
         }
     }
 
-    if opened_tags != 0 {
+    let problem = opened_tags != 0;
+    if problem {
         error!(
             "Line {} was not long enough to fit the matching regions.",
-            line_index
+            line_index + 1
         );
         for _ in 0..opened_tags {
             print!("</abbr>");
         }
     }
 
+    print!(r#"<span style="color:#909090;">&nbsp;&lt;</span>"#);
+    if problem {
+        print!(r#"&nbsp;<span style="color:red;">Matching regions extend beyond the end of line.</span>"#);
+    }
+    
     println!();
 
     for r in regions {
         if !r.applied {
             error!(
-                "Failed to highlight rule {} on line {}!",
-                r.name, line_index
+                "Failed to highlight rule '{}' on line {}!",
+                r.name, line_index + 1
             );
         }
     }
