@@ -1,13 +1,14 @@
 use std::{
-    fs::{File, self},
-    io::{BufRead, BufReader}, path::Path,
+    fs::{self, File},
+    io::{BufRead, BufReader},
+    path::Path,
 };
 
-use anyhow::{Context, bail};
+use anyhow::{bail, Context};
 use base64::{engine::general_purpose, Engine};
 use chrono::Local;
 use clap::Parser;
-use log::{info, error};
+use log::{error, info};
 use regex::Regex;
 
 /// Highlight parts of a file given a syntax.
@@ -76,7 +77,15 @@ fn main() -> anyhow::Result<()> {
 
     // parse colours
     let color_preset_greyscale: Vec<String> = vec!["fff".to_owned(), "ccc".to_owned()];
-    let color_preset_rainbow: Vec<String> = vec!["fff".to_owned(), "f88".to_owned(), "ffc088".to_owned(), "a2ff88".to_owned(), "88f9ff".to_owned(), "a288ff".to_owned(), "ff88ba".to_owned()];
+    let color_preset_rainbow: Vec<String> = vec![
+        "fff".to_owned(),
+        "f88".to_owned(),
+        "ffc088".to_owned(),
+        "a2ff88".to_owned(),
+        "88f9ff".to_owned(),
+        "a288ff".to_owned(),
+        "ff88ba".to_owned(),
+    ];
 
     let colors = if args.colors.is_some() {
         let c = args.colors.unwrap();
@@ -95,7 +104,7 @@ fn main() -> anyhow::Result<()> {
         color_preset_greyscale
     };
 
-    if colors.len() == 0 {
+    if colors.is_empty() {
         bail!("No colours have been specified so no output can be produced!");
     }
 
@@ -113,7 +122,13 @@ fn main() -> anyhow::Result<()> {
     info!("Creating regions and outputting");
     if !args.snippet {
         println!("<!doctype html><html>");
-        println!(r#"<head><meta charset="utf8"><title>Analysis of {}</title></head>"#, Path::new(&args.input_file).file_name().unwrap().to_string_lossy());
+        println!(
+            r#"<head><meta charset="utf8"><title>Analysis of {}</title></head>"#,
+            Path::new(&args.input_file)
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+        );
         println!("<body>");
     }
     println!("<pre>");
@@ -128,7 +143,11 @@ fn main() -> anyhow::Result<()> {
 
     let mut syntax_b64 = String::new();
     general_purpose::STANDARD_NO_PAD.encode_string(syntax_file, &mut syntax_b64);
-    println!(r#"Analysed at {} by <a href="https://github.com/lilopkins/fixedfile-highlighter" target="_blank" rel="noopener">fixedfile-highlighter</a> using <a href="data:text/csv;base64,{}">this syntax file</a>."#, Local::now(), syntax_b64);
+    println!(
+        r#"Analysed at {} by <a href="https://github.com/lilopkins/fixedfile-highlighter" target="_blank" rel="noopener">fixedfile-highlighter</a> using <a href="data:text/csv;base64,{}">this syntax file</a>."#,
+        Local::now(),
+        syntax_b64
+    );
 
     if !args.snippet {
         println!("</body></html>");
@@ -143,26 +162,31 @@ fn read_syntax_file<P: AsRef<Path>>(syntax_file: P) -> anyhow::Result<String> {
 }
 
 fn parse_syntax_file(syntax_file: &str, delimiter: Option<char>) -> anyhow::Result<RecordList> {
-    if delimiter.is_some() {
+    if let Some(delimiter_ch) = delimiter {
         let mut records = Vec::new();
         let mut csv_reader = csv::Reader::from_reader(syntax_file.as_bytes());
         for result in csv_reader.deserialize() {
-            let highlight_record: DelimiterHighlightRecord = result.context("Failed to parse syntax record.")?;
+            let highlight_record: DelimiterHighlightRecord =
+                result.context("Failed to parse syntax record.")?;
             records.push(highlight_record);
         }
-        Ok(RecordList::Delimiter(delimiter.unwrap(), records))
+        Ok(RecordList::Delimiter(delimiter_ch, records))
     } else {
         let mut records = Vec::new();
         let mut csv_reader = csv::Reader::from_reader(syntax_file.as_bytes());
         for result in csv_reader.deserialize() {
-            let highlight_record: FixedWidthHighlightRecord = result.context("Failed to parse syntax record.")?;
+            let highlight_record: FixedWidthHighlightRecord =
+                result.context("Failed to parse syntax record.")?;
             records.push(highlight_record);
         }
         Ok(RecordList::FixedWidth(records))
     }
 }
 
-fn generate_highlight_regions_from_records(records: &RecordList, line: &String) -> anyhow::Result<Vec<HighlightRegion>> {
+fn generate_highlight_regions_from_records(
+    records: &RecordList,
+    line: &String,
+) -> anyhow::Result<Vec<HighlightRegion>> {
     let mut regions = Vec::new();
 
     match records {
@@ -175,13 +199,13 @@ fn generate_highlight_regions_from_records(records: &RecordList, line: &String) 
                 } else {
                     true
                 };
-        
+
                 if apply_record_to_this_line {
                     if record.start.is_none() || record.length.is_none() {
                         error!("Syntax record skipped as fields were not correctly filled in. (needs 'start' and 'length'!)");
                         continue;
                     }
-    
+
                     regions.push(HighlightRegion {
                         start: record.start.unwrap() - 1,
                         end: record.start.unwrap() + record.length.unwrap() - 1,
@@ -190,7 +214,7 @@ fn generate_highlight_regions_from_records(records: &RecordList, line: &String) 
                     })
                 }
             }
-        },
+        }
 
         RecordList::Delimiter(delimiter, d_records) => {
             for record in d_records {
@@ -201,43 +225,50 @@ fn generate_highlight_regions_from_records(records: &RecordList, line: &String) 
                 } else {
                     true
                 };
-        
+
                 if apply_record_to_this_line {
                     if record.field.is_none() {
                         error!("Syntax record skipped as fields were not correctly filled in. (needs 'field'!)");
                         continue;
                     }
-    
+
                     regions.push(HighlightRegion {
-                        start: if record.field.unwrap() == 1 { 0 } else { find_nth(delimiter, record.field.unwrap() - 1, line).unwrap_or(0) },
+                        start: if record.field.unwrap() == 1 {
+                            0
+                        } else {
+                            find_nth(delimiter, record.field.unwrap() - 1, line).unwrap_or(0)
+                        },
                         end: find_nth(delimiter, record.field.unwrap(), line).unwrap_or(line.len()),
                         name: record.name.clone(),
                         applied: false,
                     })
                 }
             }
-        },
+        }
     }
 
     Ok(regions)
 }
 
 /// Find the `n`th occurrence of `delimiter` in `line`, and return the index of it, or `None` if it wasn't there.
-fn find_nth(delimiter: &char, mut n: usize, line: &String) -> Option<usize> {
-    let mut idx = 0;
-    for c in line.chars() {
+fn find_nth(delimiter: &char, mut n: usize, line: &str) -> Option<usize> {
+    for (idx, c) in line.chars().enumerate() {
         if c == *delimiter {
             n -= 1;
             if n == 0 {
                 return Some(idx);
             }
         }
-        idx += 1;
     }
     None
 }
 
-fn produce_html_for_line(line_index: usize, line: String, mut regions: Vec<HighlightRegion>, colors: &Vec<String>) {
+fn produce_html_for_line(
+    line_index: usize,
+    line: String,
+    mut regions: Vec<HighlightRegion>,
+    colors: &Vec<String>,
+) {
     let mut color_idx = 0;
     let mut opened_tags = 0;
     for (col, chr) in line.chars().enumerate() {
@@ -258,9 +289,12 @@ fn produce_html_for_line(line_index: usize, line: String, mut regions: Vec<Highl
             }
         }
     }
-        
+
     if opened_tags != 0 {
-        error!("Line {} was not long enough to fit the matching regions.", line_index);
+        error!(
+            "Line {} was not long enough to fit the matching regions.",
+            line_index
+        );
         for _ in 0..opened_tags {
             print!("</abbr>");
         }
@@ -269,8 +303,11 @@ fn produce_html_for_line(line_index: usize, line: String, mut regions: Vec<Highl
     println!();
 
     for r in regions {
-        if r.applied == false {
-            error!("Failed to highlight rule {} on line {}!", r.name, line_index);
+        if !r.applied {
+            error!(
+                "Failed to highlight rule {} on line {}!",
+                r.name, line_index
+            );
         }
     }
 }
