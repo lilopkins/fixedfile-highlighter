@@ -33,7 +33,7 @@ struct Args {
     #[arg(short = 'c', long = "colors")]
     colors: Option<String>,
 
-    /// Interpret the input file as being delimited by the provided character. The syntax file will not be expected to take the headers: `field`, `name`, `condition`.
+    /// Interpret the input file as being delimited by the provided character. The syntax file will now be expected to take the headers: `field`, `name`, `condition`.
     #[arg(short = 'd', long = "delimiter")]
     delimiter: Option<char>,
 

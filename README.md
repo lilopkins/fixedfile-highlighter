@@ -24,7 +24,7 @@ Arguments:
 
 Options:
   -c, --colors <COLORS>        The colours to output the analysed file with. This can be one of a number of inputs: a predefined preset (greyscale [default], rainbow) or; a comma separated list of hex codes
-  -d, --delimiter <DELIMITER>  Interpret the input file as being delimited by the provided character. The syntax file will not be expected to take the headers: `field`, `name`, `condition`
+  -d, --delimiter <DELIMITER>  Interpret the input file as being delimited by the provided character. The syntax file will now be expected to take the headers: `field`, `name`, `condition`
   -s, --snippet                Output an HTML snippet, rather than a full file
   -h, --help                   Print help (see more with '--help')
   -V, --version                Print version
