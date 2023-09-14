@@ -1,6 +1,6 @@
 use std::{
-    fs::File,
-    io::{BufRead, BufReader, Read}, path::Path,
+    fs::{File, self},
+    io::{BufRead, BufReader}, path::Path,
 };
 
 use anyhow::{Context, bail};
@@ -139,10 +139,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn read_syntax_file<P: AsRef<Path>>(syntax_file: P) -> anyhow::Result<String> {
-    let mut syntax_file_reader = BufReader::new(File::open(syntax_file).context("Failed to open syntax file.")?);
-    let mut syntax_file = String::new();
-    syntax_file_reader.read_to_string(&mut syntax_file)?;
-    Ok(syntax_file)
+    fs::read_to_string(syntax_file).context("Failed to read from syntax file.")
 }
 
 fn parse_syntax_file(syntax_file: &str, delimiter: Option<char>) -> anyhow::Result<RecordList> {
